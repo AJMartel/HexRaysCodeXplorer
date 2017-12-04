@@ -32,13 +32,13 @@
 #include "Linux.h"
 #endif
 
-bool isMSVC()
+bool compilerIs(const char *name)
 {
 	comp_t vc = default_compiler();
 	//qstring comp = get_compiler_name(vc); //fullname
 	qstring comp = get_compiler_abbr(vc);
-	
-	if (comp == "vc")
+
+	if (comp == name)
 		return true;
 	return false;
 }
@@ -50,9 +50,9 @@ bool idaapi show_string_in_custom_view(void *ud, qstring title, qstring str)
 	string_view_form_info_t *si = new string_view_form_info_t(form);
 	si->sv.push_back(simpleline_t(str));
 
-	simpleline_place_t s1(NULL);
+	simpleline_place_t s1;
 	simpleline_place_t s2(si->sv.size());
-	si->cv = create_custom_viewer(title.c_str(), NULL, &s1, &s2, &s1, NULL, &si->sv);
+	si->cv = create_custom_viewer(title.c_str(), NULL, &s1, &s2, &s1, 0, &si->sv);
 	si->codeview = create_code_viewer(form, si->cv, CDVF_NOLINES);
 	set_custom_viewer_handlers(si->cv, NULL, si);
 	open_tform(form, FORM_ONTOP | FORM_RESTORE);
@@ -285,4 +285,64 @@ void SHA1MessageDigestToString(uint8_t Message_Digest[SHA1HashSize], char outbuf
 		outbuffer[i * 2] = int_to_hex(Message_Digest[i] >> 4);
 		outbuffer[i * 2 + 1] = int_to_hex(Message_Digest[i] & 0xF);
 	}
+}
+
+void idaapi setUnknown(ea_t ea, asize_t size)
+{
+	// TODO: Does the overrun problem still exist?
+	//do_unknown_range(ea, (size_t)size, DOUNK_SIMPLE);
+	while (size > 0)
+	{
+		asize_t isize = get_item_size(ea);
+		if (isize > size)
+			break;
+		else
+		{
+			do_unknown(ea, DOUNK_SIMPLE);
+			ea += (ea_t)isize, size -= isize;
+		}
+	};
+}
+
+
+void MakeName(ea_t ea, qstring name, char * prefix, char * postfix)
+{
+	qstring g_name(prefix);
+	g_name += name;
+	g_name += postfix;
+
+	g_name.replace(" ", "_");
+	g_name.replace("*", "_");
+	g_name.replace(",", "_");
+	g_name.replace("<", "_lt");
+	g_name.replace(">", "_ge");
+	set_name(ea, g_name.c_str(), SN_NOWARN);
+}
+
+bool MakeArray(ea_t ea, size_t nitems)
+{
+	opinfo_t ti;
+	asize_t itemsize;
+	tid_t tid;
+	flags_t flags = getFlags(ea);
+	if (isCode(flags) || isTail(flags) || isAlign(flags))
+		return false;
+
+	if (isUnknown(flags))
+		flags = 0;
+
+	if (isStruct(flags))
+	{
+		if (get_opinfo(ea, 0, flags, &ti) == 0)
+			return false;
+		itemsize = get_data_elsize(ea, flags, &ti);
+		tid = ti.tid;
+	}
+	else
+	{
+		itemsize = get_item_size(ea);
+		tid = BADADDR;
+	}
+
+	return do_data_ex(ea, flags, itemsize * nitems, tid);
 }

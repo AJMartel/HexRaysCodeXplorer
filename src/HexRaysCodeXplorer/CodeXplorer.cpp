@@ -32,9 +32,13 @@ along with this program.  If not, see
 #include "Utility.h"
 
 #include "Debug.h"
+#include "IObjectFormatParser.h"
+#include "MSVCObjectFormatParser.h"
+#include "GCCObjectFormatParser.h"
 
 extern plugin_t PLUGIN;
 
+IObjectFormatParser *objectFormatParser = 0;
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 
@@ -227,11 +231,12 @@ static int idaapi gr_callback(void *ud, int code, va_list va)
 		DECLARE_GI_VARS;
 		graph_viewer_t *v = va_arg(va, graph_viewer_t *);
 		selection_item_t *s = va_arg(va, selection_item_t *);
-
-		callgraph_t::nodeinfo_t *ni = fg->get_info(s->node);
-		result = ni != NULL;
-		if (result && s->is_node && ni->ea != BADADDR)
-			jumpto(ni->ea);
+                if (s != NULL) {
+                        callgraph_t::nodeinfo_t *ni = fg->get_info(s->node);
+                        result = ni != NULL;
+                        if (result && s->is_node && ni->ea != BADADDR)
+                                jumpto(ni->ea);
+                }
 	}
 	break;
 
@@ -429,7 +434,7 @@ static bool idaapi rename_simple_expr(void *ud)
 					}
 				}
 
-				for (int i = 0; i < roots[lvar_name].size(); i++) 
+				for (size_t i = 0; i < roots[lvar_name].size(); i++)
 				{
 					if (roots[lvar_name][i] == rvar_name) 
 						return 0;
@@ -456,7 +461,7 @@ static bool idaapi show_offset_in_windbg_format(void *ud) {
 	char _offset[32] = { 0 };
 	char module_name[256] = { 0 };
 	qstring result;
-	int offset;
+	adiff_t offset;
 	vdui_t &vu = *(vdui_t *)ud;
 	vu.get_current_item(USE_KEYBOARD);
 	offset = vu.item.i->ea - get_imagebase();
@@ -470,7 +475,12 @@ static bool idaapi show_offset_in_windbg_format(void *ud) {
 	get_root_filename(module_name, 255);
 	for (int i = 0; i < 255; i++)
 		if (module_name[i] == '.') { module_name[i] = 0; break; }
-	sprintf(_offset, "%x", offset);
+#ifdef __EA64__
+    const char *fmt = "%llx";
+#else
+    const char *fmt = "%x";
+#endif
+	sprintf(_offset, fmt, offset);
 	result.cat_sprnt("%s+0x%s", module_name, _offset);
 
 	qstring title {0};
@@ -540,16 +550,24 @@ static bool idaapi show_current_citem_in_custom_view(void *ud)
 // display Object Explorer
 static bool idaapi display_vtbl_objects(void *ud)
 {
-	if (isMSVC())
+	if (!objectFormatParser)
 	{
-		vdui_t &vu = *(vdui_t *)ud;
-		search_objects();
-		object_explorer_form_init();
-		return true;
+		//if (isMSVC())
+		if (compilerIs(MSVC_COMPILER_ABBR))
+			objectFormatParser = new MSVCObjectFormatParser();
+		if (compilerIs(GCC_COMPILER_ABBR))
+			objectFormatParser = new GCCObjectFormatParser();
+		if (!objectFormatParser)
+		{
+			info("CodeXplorer doesn't support parsing of not MSVC VTBL's");
+			return false;
+		}
 	}
 
-	info("CodeXplorer doesn't support parsing of not MSVC VTBL's");
-	return false;
+	vdui_t &vu = *(vdui_t *)ud;
+	search_objects();
+	object_explorer_form_init();
+	return true;
 }
 
 
